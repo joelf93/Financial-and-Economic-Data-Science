@@ -1,0 +1,374 @@
+---
+title: "Applying RF and ANN to financial data and  analyse which model performs best for the data"
+author: "Fotso Tenku"
+date: "05 2 2021"
+output: html_document
+---
+
+## 1- Financial time series
+
+## Find the financial time series
+
+```{r}
+set.seed(6810782)
+
+data <- read.csv(file = "S&P 500.csv")
+
+summary(data)
+```
+
+```{r}
+#Display stock prices
+
+n<-dim(data)[1]
+
+time = seq(2015 + 4/12, 2020 + 4/12 , length.out = n)
+
+plot(time,data$Close,type="l",xlab="Year",ylab="index",main="The S&P 500 Index from June 2015 to June 2020")
+```
+
+```{r}
+# Database transformation by using the function log
+
+data$Open <- log(data$Open)
+data$High <- log(data$High)
+data$Low <- log(data$Low)
+data$Close <- log(data$Close)
+data$Adj.Close <- log(data$Adj.Close)
+data$Volume <- log(data$Volume)
+
+head(data)
+```
+
+```{r}
+# Display the logarithms of the series
+
+plot(time,data$Close,type="l",xlab="Year",ylab="index",main="The logarithms of S&P 500 Index Data" )
+```
+
+```{r}
+# Compute Return
+
+Return = diff(log(data$Close))
+
+# Display Return
+
+time_2 = time[2:n]
+plot(time_2,Return,type="l",xlab="Year",ylab = "Return")
+title("The Return Series of S&P 500")
+```
+
+```{r}
+# Daten Trennung into test and train set
+
+data_train= data[1:which(data$Date=="2019-06-28"),]
+data_test = data[(which(data$Date=="2019-06-28")+1):n,]
+```
+
+## 2-  Random Forest to S&P 500
+
+```{r} 
+set.seed(6810782)
+
+library(randomForest)
+
+
+
+# determine the value of mtry
+
+# find the best combination of the hyperparameter of mtry for the Random Forest
+
+
+mtry <- tuneRF(data_train[,c(-1,-5)],data_train[,5],
+            stepFactor = 2,plot = TRUE,
+            trace = TRUE,
+            improve = 0.01)
+best.m<- mtry[mtry[,2]==min(mtry[,2]),1]
+best.m
+```
+
+```{r}
+# Fit a Random Forest
+
+data_rf <- randomForest(Close ~ ., data= data_train[,-1],mtry = best.m,importance=TRUE)
+data_rf
+
+
+# display Random forest model
+
+plot(data_rf,main= "Random Forest")
+```
+
+```{r}
+# Display the importance variables
+
+varImpPlot(data_rf, main= " Variable importance")
+
+importance(data_rf)
+```
+
+```{r}
+# Prediction 
+
+Close_predict_train <- predict(data_rf,data_train)
+
+Close_predict_test <- predict(data_rf,data_test)
+
+# Transform to initial value
+
+Close <- exp(data_test$Close)
+predict<- exp(Close_predict_test)
+prediction <- data.frame(cbind(Close,predict))
+date <- data_test$Date
+rf_prediction <- cbind(date,prediction)
+
+# Display the 10 first and last days of the Forecast
+
+head(rf_prediction, n=10)
+tail(rf_prediction,n=10)
+```
+
+## Display the Forecast
+
+```{r}
+n_1 <- dim(data_test)[1]
+n_2 <- dim(data_train)[1]
+time_3 <- seq(2019 + 4/12, 2020 + 4/12 , length.out = n_1)
+time_4 <- seq(2015 + 4/12, 2019 + 4/12, length.out = n_2)
+
+plot(time, data$Close,xlab="Year",ylab="index",type = "l",main="Observed and fitted Value of the series using RF")
+lines(time_4,Close_predict_train,col = "blue")
+lines(time_3,Close_predict_test,col="red")
+legend(x = 2015.3, y = 8.15, legend = c("Observed value", "fitted value","predicted value"),
+       col = c("black","blue","red"), lty = 1)
+```
+
+```{r}
+# Calcul of the residuals of the logarithms of the Series
+
+train_residual<-data.frame(data_train$Close-Close_predict_train)
+colnames(train_residual)[which(names(train_residual) == "data_train.Close...Close_predict_train")] <- "residuals"
+
+test_residual<-data.frame(data_test$Close-Close_predict_test)
+colnames(test_residual)[which(names(test_residual) == "data_test.Close...Close_predict_test")] <- "residuals"
+
+residuals<-rbind(train_residual, test_residual)
+
+# Display the residuals of the logarithms of the series
+
+plot(time,residuals$residuals,xlab="Year",ylab="residuals",main="The Residuals of the S&P 500")
+```
+
+```{r}
+# calculate the RMSE
+
+library(Metrics)
+
+rmse_test <- rmse(data_test$Close,Close_predict_test)
+rmse_test
+
+# calculate the R-squared
+
+ydi <- data_test$Close
+yi <- predict(data_rf,data_test)
+ym <- mean(data$Close)
+R_rf <- 1- ((sum((yi-ydi)^2))/(sum((ydi-ym)^2)))
+R_rf
+```
+
+## 3- ANN to S&P 500
+
+```{r}
+library(neuralnet)
+
+# a-fit a Neural networks
+
+# calculate the suitable number of neurons in the hidden
+
+# neuron = 1 
+
+set.seed(6810782)
+
+nn_1 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  threshold=0.1,hidden= 1 ,linear.output = TRUE)
+pred_1= compute(nn_1,data_test)
+R_1=rmse(data_test$Close,pred_1$net.result)
+
+# neurons = 2
+
+set.seed(6810782)
+nn_2 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 2 ,threshold=0.1,linear.output = TRUE)
+pred_2= compute(nn_2,data_test)
+R_2=rmse(data_test$Close,pred_2$net.result)
+
+# neurons = 3
+set.seed(6810782)
+nn_3 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 3 ,threshold=0.1,linear.output = TRUE)
+pred_3= compute(nn_3,data_test)
+R_3=rmse(data_test$Close,pred_3$net.result)
+
+# neurons = 4
+set.seed(6810782)
+nn_4 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 4,threshold=0.1 ,linear.output = TRUE)
+pred_4= compute(nn_4,data_test)
+R_4=rmse(data_test$Close,pred_4$net.result)
+
+# neurons = 5
+set.seed(6810782)
+nn_5 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 5 ,threshold=0.1,linear.output = TRUE)
+pred_5= compute(nn_5,data_test)
+R_5=rmse(data_test$Close,pred_5$net.result)
+
+# neurons = 6
+set.seed(6810782)
+nn_6 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 6,threshold=0.1 ,linear.output = TRUE)
+pred_6= compute(nn_6,data_test)
+R_6=rmse(data_test$Close,pred_6$net.result)
+
+# neurons = 7
+set.seed(6810782)
+nn_7 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                hidden= 7,threshold=0.1 ,linear.output = TRUE)
+pred_7= compute(nn_7,data_test)
+R_7=rmse(data_test$Close,pred_7$net.result)
+
+# neurons = 8
+set.seed(6810782)
+nn_8 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 8,threshold=0.1 ,linear.output = TRUE)
+pred_8= compute(nn_8,data_test)
+R_8=rmse(data_test$Close,pred_8$net.result)
+
+# neurons = 9
+set.seed(6810782)
+nn_9<-neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                hidden= 9,threshold=0.1 ,linear.output = TRUE)
+pred_9= compute(nn_9,data_test)
+R_9=rmse(data_test$Close,pred_9$net.result)
+
+#  neurons = 10
+set.seed(6810782)
+nn_10 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  threshold=0.1,hidden= 10 ,linear.output = TRUE)
+pred_10= compute(nn_10,data_test)
+R_10=rmse(data_test$Close,pred_10$net.result)
+
+# neurons = 11
+set.seed(6810782)
+nn_11 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 11 ,threshold=0.1,linear.output = TRUE)
+pred_11= compute(nn_11,data_test)
+R_11=rmse(data_test$Close,pred_11$net.result)
+
+# neurons = 12
+set.seed(6810782)
+nn_12 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 12,threshold=0.1,linear.output = TRUE)
+pred_12= compute(nn_12,data_test)
+R_12=rmse(data_test$Close,pred_12$net.result)
+
+# neurons = 13
+set.seed(6810782)
+nn_13 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 13,threshold=0.1 ,linear.output = TRUE)
+pred_13= compute(nn_13,data_test)
+R_13=rmse(data_test$Close,pred_13$net.result)
+
+# neurons = 14
+set.seed(6810782)
+nn_14 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 14 ,threshold=0.1,linear.output = TRUE)
+pred_14= compute(nn_14,data_test)
+R_14=rmse(data_test$Close,pred_14$net.result)
+
+# neurons = 15
+set.seed(6810782)
+nn_15 <- neuralnet(Close~Open+High+Low+Adj.Close+Volume,data=data_train,
+                  hidden= 15,threshold=0.1 ,linear.output = TRUE)
+pred_15= compute(nn_15,data_test)
+R_15=rmse(data_test$Close,pred_15$net.result)
+
+
+neurons = c(1,2,3,4,5,6,7,
+           8,9,10,11,12,13,14,15)
+rmse= c(R_1,R_2,R_3,R_4,R_5,R_6,R_7,R_8, R_9,R_10,
+        R_11,R_12,R_13,R_14,R_15)
+value = data.frame(cbind(neurons,rmse))
+value
+```
+
+```{r}
+which(value$rmse==min(value$rmse))
+```
+
+```{r}
+# the model with 9 neurons in the  hidden layer is the optimal neural network
+
+# the final ANN
+
+nn<- nn_9
+
+
+
+# plot Neural networks
+
+plot(nn,rep="best")
+
+# Prediction
+
+prediction_train <- compute(nn,data_train)
+prediction_test <- compute(nn,data_test)
+```
+
+```{r}
+# Transform to initial value and display the 10 first and last days
+
+predicte<- exp(prediction_test$net.result)
+ann_prediction <- cbind(Close,predicte)
+head(ann_prediction, n=10)
+tail(ann_prediction,n=10)
+```
+
+```{r}
+# Display the residuals of the logarithms of the Series 
+
+residula_train<-data_train$Close-prediction_train$net.result
+residual_test<-data_test$Close-prediction_test$net.result
+residuals <-rbind(residula_train,residual_test)
+
+plot(time,residuals,xlab = "Year", ylab = "residuals", type = "o", main = "The residuals of the ANN model")
+```
+
+```{r}
+# calculate rmse
+
+
+rmse_test_nn <- rmse(data_test$Close,prediction_test$net.result)
+
+rmse_test_nn
+```
+
+## Display the Forecast
+
+```{r}
+plot(time, data$Close,xlab="Year",ylab="index",type="o",main="observed and fitted Values of the series using ANN")
+lines(time_4,prediction_train$net.result,col = "blue")
+lines(time_3,prediction_test$net.result,col="red")
+legend(x = 2015.3, y = 8.15, legend = c("Observed ", "fitted values ","predicted values"),
+       col = c("black","blue","red"), lty = 1)
+```
+
+```{r}
+# calculate the R-squared
+
+ydi<- data_test$Close
+yi<- compute(nn,data_test)
+ym<-mean(data$Close)
+R_NN<- 1-((sum((yi$net.result-ydi)^2))/(sum((ydi-ym)^2)))
+R_NN
+```
